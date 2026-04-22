@@ -1,0 +1,26 @@
+name: Update GCP IP List
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天凌晨自动更新一次
+  workflow_dispatch: # 允许你手动点击运行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run script
+        run: python parse_ips.py
+      - name: Commit and push if changed
+        run: |
+          git config --global user.name 'github-actions'
+          git config --global user.email 'github-actions@github.com'
+          git add gcp_ranges.txt
+          git commit -m "Update IP list" || exit 0
+          git push
