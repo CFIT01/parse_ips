@@ -1,10 +1,11 @@
 name: Update IP Lists (GCP & WeChat)
 on:
   schedule:
-    - cron: '0 0 * * *' 
+    - cron: '0 0 * * *' # 谷歌云依然每天定时跑
   workflow_dispatch: 
+  repository_dispatch:
+    types: [budibase_wechat_json] # 监听来自 Budibase 的触发事件
 
-# 核心修正：添加写权限，解决 Exit Code 128
 permissions:
   contents: write
 
@@ -12,10 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 升级到 v4，解决 Node.js 警告
       - uses: actions/checkout@v4
-      
-      # 升级到 v5，解决 Node.js 警告
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -23,24 +21,45 @@ jobs:
       - name: Install dependencies
         run: pip install requests
         
-      # 1. 运行原有的谷歌云脚本
+      # 1. 定时触发或手动触发时，才跑原有的谷歌云脚本
       - name: Run GCP script
+        if: github.event_name != 'repository_dispatch'
         run: python parse_ips.py
         
-      # 2. 运行新增的企业微信脚本（安全注入 Secrets）
-      - name: Run WeChat script
+      # 2. 如果是 Budibase 扔过来的 JSON，在 GitHub 端进行清洗和转化
+      - name: Convert Budibase JSON to FortiGate TXT
+        if: github.event_name == 'repository_dispatch'
         env:
-          CORP_ID: ${{ secrets.CORP_ID }}
-          CORP_SECRET: ${{ secrets.CORP_SECRET }}
-        run: python parse_wechat_ips.py
+          # 将 Budibase 传过来的 JSON 数组注入为环境变量
+          BUDIBASE_DATA: ${{ toJson(github.event.client_payload.raw_json) }}
+        run: |
+          python -c "
+          import json, os, sys
+          
+          # 读取并解析来自 Budibase 的原始数据
+          raw_ips = json.loads(os.environ['BUDIBASE_DATA'])
+          print(f'收到来自 Budibase 的原始 IP 数量: {len(raw_ips)}')
+          
+          # 核心保护机制（熔断）
+          if len(raw_ips) < 10:
+              print('🚨 CRITICAL ERROR: IP 数量异常，拒绝更新！')
+              sys.exit(1)
+              
+          # 格式化转换（* 转换成 0/24）并去重排序
+          cidr_ips = sorted(list(set([ip.replace('*', '0/24') if '*' in ip else ip for ip in raw_ips])))
+          
+          # 写入飞塔可以直接读取的纯文本文件
+          with open('wechat_ranges.txt', 'w') as f:
+              f.write('\n'.join(cidr_ips))
+              
+          print('✅ 格式转化完成，成功写入 wechat_ranges.txt')
+          "
         
-      # 3. 统一暂存并提交变动
+      # 3. 统一提交代码变动
       - name: Commit and push if changed
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-          # 同时跟踪两个文本文件的变动
           git add gcp_ranges.txt wechat_ranges.txt
-          # 只要其中任意一个文件有变动就会提交；全无变动则优雅退出
-          git commit -m "Update IP lists (GCP & WeChat)" || exit 0
+          git commit -m "Update IP lists (GCP/WeChat)" || exit 0
           git push
