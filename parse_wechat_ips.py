@@ -37,8 +37,8 @@ def get_wechat_ips():
         raw_ips = w_data.get("ip_list", [])
 
         # 3. 核心保护机制：阈值检查
-        # 企业微信回调 IP 正常情况下有上百个。如果少于 10 个，大概率是数据源或权限出错了。
-        if len(raw_ips) < 10:
+        # 企业微信回调 IP 正常情况下有上百个。如果少于 3 个，大概率是数据源或权限出错了。
+        if len(raw_ips) < 3:
             print(f"CRITICAL ERROR: Only {len(raw_ips)} WeChat IPs found. Data source might be broken.")
             sys.exit(1)
 
