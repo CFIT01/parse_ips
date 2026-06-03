@@ -1,4 +1,4 @@
-name: Update GCP IP List
+name: Update IP Lists (GCP & WeChat)
 on:
   schedule:
     - cron: '0 0 * * *' 
@@ -23,14 +23,24 @@ jobs:
       - name: Install dependencies
         run: pip install requests
         
-      - name: Run script
+      # 1. 运行原有的谷歌云脚本
+      - name: Run GCP script
         run: python parse_ips.py
         
+      # 2. 运行新增的企业微信脚本（安全注入 Secrets）
+      - name: Run WeChat script
+        env:
+          CORP_ID: ${{ secrets.CORP_ID }}
+          CORP_SECRET: ${{ secrets.CORP_SECRET }}
+        run: python parse_wechat_ips.py
+        
+      # 3. 统一暂存并提交变动
       - name: Commit and push if changed
         run: |
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
-          git add gcp_ranges.txt
-          # 即使没有变动也不会报错退出
-          git commit -m "Update IP list" || exit 0
+          # 同时跟踪两个文本文件的变动
+          git add gcp_ranges.txt wechat_ranges.txt
+          # 只要其中任意一个文件有变动就会提交；全无变动则优雅退出
+          git commit -m "Update IP lists (GCP & WeChat)" || exit 0
           git push
