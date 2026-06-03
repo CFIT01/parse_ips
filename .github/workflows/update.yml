@@ -41,7 +41,7 @@ jobs:
           print(f'收到来自 Budibase 的原始 IP 数量: {len(raw_ips)}')
           
           # 核心保护机制（熔断）
-          if len(raw_ips) < 10:
+          if len(raw_ips) < 3:
               print('🚨 CRITICAL ERROR: IP 数量异常，拒绝更新！')
               sys.exit(1)
               
