@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -26,33 +27,45 @@ jobs:
         if: github.event_name != 'repository_dispatch'
         run: python parse_ips.py
         
-      # 2. 如果是 Budibase 扔过来的 JSON，在 GitHub 端进行清洗和转化
-      - name: Convert Budibase JSON to FortiGate TXT
+      # 2. 接收 Budibase 的 JSON，并统一转化为严格的 CIDR 格式
+      - name: Convert Budibase JSON to Strict CIDR TXT
         if: github.event_name == 'repository_dispatch'
         env:
-          # 将 Budibase 传过来的 JSON 数组注入为环境变量
           BUDIBASE_DATA: ${{ toJson(github.event.client_payload.raw_json) }}
         run: |
           python -c "
           import json, os, sys
           
-          # 读取并解析来自 Budibase 的原始数据
+          # 读取 Budibase 传过来的原始数据
           raw_ips = json.loads(os.environ['BUDIBASE_DATA'])
           print(f'收到来自 Budibase 的原始 IP 数量: {len(raw_ips)}')
           
-          # 核心保护机制（熔断）
-          if len(raw_ips) < 3:
+          # 熔断保护
+          if len(raw_ips) < 10:
               print('🚨 CRITICAL ERROR: IP 数量异常，拒绝更新！')
               sys.exit(1)
               
-          # 格式化转换（* 转换成 0/24）并去重排序
-          cidr_ips = sorted(list(set([ip.replace('*', '0/24') if '*' in ip else ip for ip in raw_ips])))
+          cidr_ips = []
+          for ip in raw_ips:
+              ip = ip.strip()
+              if '*' in ip:
+                  # 兼容可能的通配符格式：101.226.103.* -> 101.226.103.0/24
+                  cidr_ips.append(ip.replace('*', '0/24'))
+              elif '/' in ip:
+                  # 已经是 CIDR 格式：保持原样
+                  cidr_ips.append(ip)
+              else:
+                  # 单个独立 IP：统一末尾补齐 /32 变成严格 CIDR
+                  cidr_ips.append(f'{ip}/32')
+                  
+          # 去重并排序
+          final_ips = sorted(list(set(cidr_ips)))
           
-          # 写入飞塔可以直接读取的纯文本文件
+          # 写入飞塔读取的纯文本
           with open('wechat_ranges.txt', 'w') as f:
-              f.write('\n'.join(cidr_ips))
+              f.write('\n'.join(final_ips))
               
-          print('✅ 格式转化完成，成功写入 wechat_ranges.txt')
+          print(f'✅ 格式已全部统一为标准 CIDR 格式，共 {len(final_ips)} 条记录。')
           "
         
       # 3. 统一提交代码变动
@@ -61,5 +74,5 @@ jobs:
           git config --global user.name 'github-actions'
           git config --global user.email 'github-actions@github.com'
           git add gcp_ranges.txt wechat_ranges.txt
-          git commit -m "Update IP lists (GCP/WeChat)" || exit 0
+          git commit -m "Update IP lists (GCP/WeChat CIDR)" || exit 0
           git push
